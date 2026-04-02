@@ -47,7 +47,7 @@ async def _seed_admin_and_products():
     async with AsyncSessionLocal() as db:
         existing_admin = (
             await db.execute(select(User).where(User.role == UserRole.admin))
-        ).scalar_one_or_none()
+        ).scalars().first()
 
         if not existing_admin:
             db.add(User(

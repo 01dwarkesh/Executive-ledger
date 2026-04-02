@@ -47,6 +47,25 @@ async def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.put("/me", response_model=UserOut, summary="Update own profile (name)")
+async def update_me(
+    payload: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await auth_service.update_user(str(current_user.id), payload, db)
+
+
+@router.post("/me/change-password", response_model=dict, summary="Change own password")
+async def change_own_password(
+    payload: UserPasswordReset,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await auth_service.reset_user_password(str(current_user.id), payload, db)
+    return {"message": "Password changed successfully."}
+
+
 @router.get("/users", response_model=List[UserOut], summary="[Admin] List all users")
 async def list_users(
     db: AsyncSession = Depends(get_db),
