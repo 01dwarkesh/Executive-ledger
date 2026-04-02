@@ -1,168 +1,181 @@
-from jinja2 import Environment, BaseLoader
-from weasyprint import HTML
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+)
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
 
-TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:48px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px}
-  .brand{font-size:22px;font-weight:700;color:#185FA5}
-  .brand-sub{font-size:11px;color:#6b7280;margin-top:3px}
-  .qmeta{text-align:right}
-  .qnum{font-size:20px;font-weight:700}
-  .qver{font-size:12px;color:#6b7280;margin-top:2px}
-  .badge{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:600;background:#dbeafe;color:#1e40af}
-  .section{margin-bottom:28px}
-  .sec-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#9ca3af;padding-bottom:6px;border-bottom:1px solid #f3f4f6;margin-bottom:12px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px}
-  .fl{font-size:10px;color:#9ca3af;margin-bottom:2px}
-  .fv{font-size:13px;color:#111}
-  table{width:100%;border-collapse:collapse}
-  th{background:#f9fafb;padding:9px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb}
-  td{padding:11px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle}
-  tr:last-child td{border-bottom:none}
-  .img-cell img{width:72px;height:54px;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px}
-  .img-cell .no-img{width:72px;height:54px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#9ca3af}
-  .num{text-align:right}
-  .totals{display:flex;justify-content:flex-end;margin-top:16px}
-  .totals table{width:260px}
-  .totals td{padding:5px 10px;border:none;font-size:13px}
-  .totals .lbl{color:#6b7280}
-  .totals .grand{font-size:16px;font-weight:700;border-top:2px solid #111;padding-top:8px}
-  .notes-box{background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:14px;font-size:13px;line-height:1.6;white-space:pre-wrap}
-  .footer{margin-top:48px;text-align:center;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:14px}
-  .row-num{color:#9ca3af;font-size:11px}
-  .pname{font-weight:600;font-size:13px}
-  .pdesc{font-size:11px;color:#6b7280;margin-top:2px}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div>
-    <div class="brand">Executive Ledger</div>
-    <div class="brand-sub">Internal Quoting Tool</div>
-  </div>
-  <div class="qmeta">
-    <div class="qnum">{{ quote.quote_number }}</div>
-    <div class="qver">Version {{ quote.version }}</div>
-    <div class="badge">{{ quote.status }}</div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="sec-title">Client Information</div>
-  <div class="grid2">
-    <div><div class="fl">Company</div><div class="fv">{{ quote.client.company_name }}</div></div>
-    <div><div class="fl">Contact</div><div class="fv">{{ quote.client.contact_name }}</div></div>
-    <div><div class="fl">Email</div><div class="fv">{{ quote.client.email }}</div></div>
-    <div><div class="fl">Phone</div><div class="fv">{{ quote.client.phone or "—" }}</div></div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="sec-title">Quote Details</div>
-  <div class="grid2">
-    <div><div class="fl">Quote Number</div><div class="fv">{{ quote.quote_number }}</div></div>
-    <div><div class="fl">Issue Date</div><div class="fv">{{ quote.created_at.strftime('%b %d, %Y') }}</div></div>
-    <div><div class="fl">Valid Until</div><div class="fv">{{ quote.validity_date.strftime('%b %d, %Y') if quote.validity_date else "—" }}</div></div>
-    <div><div class="fl">Currency</div><div class="fv">{{ quote.currency }}</div></div>
-  </div>
-</div>
-
-<div class="section">
-  <div class="sec-title">Line Items</div>
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Product</th>
-        <th>Preview</th>
-        <th>Size / Cap.</th>
-        <th>Color</th>
-        <th>Lead Time</th>
-        <th class="num">Qty</th>
-        <th class="num">Unit Price</th>
-        <th class="num">Discount</th>
-        <th class="num">Amount</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in quote.items %}
-      <tr>
-        <td class="row-num">{{ "%02d"|format(loop.index) }}</td>
-        <td>
-          <div class="pname">{{ item.product_name }}</div>
-          {% if item.description %}<div class="pdesc">{{ item.description }}</div>{% endif %}
-        </td>
-        <td class="img-cell">
-          {% if item.mockup_url %}
-            <img src="{{ item.mockup_url }}" />
-          {% else %}
-            <div class="no-img">No preview</div>
-          {% endif %}
-        </td>
-        <td>{{ item.size_capacity or "—" }}</td>
-        <td>{{ item.color or "—" }}</td>
-        <td>{{ item.lead_time or "—" }}</td>
-        <td class="num">{{ item.quantity }}</td>
-        <td class="num">{{ quote.currency }} {{ "%.2f"|format(item.unit_price) }}</td>
-        <td class="num">{{ item.discount_pct }}%</td>
-        <td class="num" style="font-weight:600">{{ quote.currency }} {{ "%.2f"|format(item.final_price or 0) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-
-  <div class="totals">
-    <table>
-      <tr><td class="lbl">Subtotal</td><td class="num">{{ quote.currency }} {{ "%.2f"|format(subtotal) }}</td></tr>
-      <tr><td class="lbl">Tax ({{ quote.tax_pct }}%)</td><td class="num">{{ quote.currency }} {{ "%.2f"|format(tax) }}</td></tr>
-      {% if quote.adjustment != 0 %}
-      <tr><td class="lbl">Adjustment</td><td class="num">{{ quote.currency }} {{ "%.2f"|format(quote.adjustment) }}</td></tr>
-      {% endif %}
-      <tr class="grand"><td><strong>Grand Total Due</strong></td><td class="num"><strong>{{ quote.currency }} {{ "%.2f"|format(grand_total) }}</strong></td></tr>
-    </table>
-  </div>
-</div>
-
-{% if quote.notes %}
-<div class="section">
-  <div class="sec-title">Notes</div>
-  <div class="notes-box">{{ quote.notes }}</div>
-</div>
-{% endif %}
-
-{% if quote.terms %}
-<div class="section">
-  <div class="sec-title">Terms &amp; Conditions</div>
-  <div class="notes-box">{{ quote.terms }}</div>
-</div>
-{% endif %}
-
-<div class="footer">
-  Executive Ledger &nbsp;|&nbsp; {{ quote.quote_number }} v{{ quote.version }} &nbsp;|&nbsp; Generated {{ quote.created_at.strftime('%Y-%m-%d') }}
-</div>
-</body>
-</html>
-"""
+PRIMARY = colors.HexColor("#185FA5")
+LIGHT_BG = colors.HexColor("#f9fafb")
+BORDER = colors.HexColor("#e5e7eb")
+MUTED = colors.HexColor("#6b7280")
+BLACK = colors.HexColor("#111111")
 
 
 def generate_pdf(quote) -> bytes:
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=15*mm, rightMargin=15*mm,
+        topMargin=15*mm, bottomMargin=15*mm,
+    )
+
+    styles = getSampleStyleSheet()
+    bold = ParagraphStyle("bold", fontName="Helvetica-Bold", fontSize=10, textColor=BLACK)
+    normal = ParagraphStyle("normal", fontName="Helvetica", fontSize=9, textColor=BLACK)
+    muted = ParagraphStyle("muted", fontName="Helvetica", fontSize=8, textColor=MUTED)
+    right = ParagraphStyle("right", fontName="Helvetica", fontSize=9, alignment=TA_RIGHT)
+    right_bold = ParagraphStyle("right_bold", fontName="Helvetica-Bold", fontSize=10, alignment=TA_RIGHT)
+    center = ParagraphStyle("center", fontName="Helvetica", fontSize=8, alignment=TA_CENTER, textColor=MUTED)
+
     subtotal = sum(item.final_price or 0 for item in quote.items)
     tax = round(subtotal * (quote.tax_pct / 100), 2)
     grand_total = round(subtotal + tax + (quote.adjustment or 0), 2)
 
-    env = Environment(loader=BaseLoader())
-    html_str = env.from_string(TEMPLATE).render(
-        quote=quote,
-        subtotal=subtotal,
-        tax=tax,
-        grand_total=grand_total,
-    )
-    return HTML(string=html_str).write_pdf()
+    story = []
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    header_data = [[
+        Paragraph("<font color='#185FA5' size=16><b>Executive Ledger</b></font><br/>"
+                  "<font color='#6b7280' size=8>Internal Quoting Tool</font>", styles["Normal"]),
+        Paragraph(
+            f"<font size=16><b>{quote.quote_number}</b></font><br/>"
+            f"<font color='#6b7280' size=8>Version {quote.version}</font><br/>"
+            f"<font color='#1e40af' size=8><b>{quote.status.upper()}</b></font>",
+            ParagraphStyle("hdr_right", alignment=TA_RIGHT, fontSize=9)
+        ),
+    ]]
+    header_table = Table(header_data, colWidths=[90*mm, 90*mm])
+    header_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(header_table)
+    story.append(Spacer(1, 6*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER))
+    story.append(Spacer(1, 5*mm))
+
+    # ── Client + Quote Details ───────────────────────────────────────────────
+    def field(label, value):
+        return [Paragraph(label, muted), Paragraph(str(value) if value else "—", normal)]
+
+    validity = quote.validity_date.strftime("%b %d, %Y") if quote.validity_date else "—"
+    created = quote.created_at.strftime("%b %d, %Y")
+
+    info_data = [
+        [Paragraph("<b>CLIENT INFORMATION</b>", muted), Paragraph("<b>QUOTE DETAILS</b>", muted)],
+        [
+            Table([
+                field("Company", quote.client.company_name),
+                field("Contact", quote.client.contact_name),
+                field("Email", quote.client.email),
+                field("Phone", quote.client.phone),
+            ], colWidths=[22*mm, 60*mm]),
+            Table([
+                field("Quote Number", quote.quote_number),
+                field("Issue Date", created),
+                field("Valid Until", validity),
+                field("Currency", quote.currency),
+            ], colWidths=[22*mm, 60*mm]),
+        ]
+    ]
+    info_table = Table(info_data, colWidths=[90*mm, 90*mm])
+    info_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Line Items ───────────────────────────────────────────────────────────
+    story.append(Paragraph("<b>LINE ITEMS</b>", muted))
+    story.append(Spacer(1, 2*mm))
+
+    item_rows = [[
+        Paragraph("<b>#</b>", muted),
+        Paragraph("<b>Product</b>", muted),
+        Paragraph("<b>Size/Cap.</b>", muted),
+        Paragraph("<b>Color</b>", muted),
+        Paragraph("<b>Lead Time</b>", muted),
+        Paragraph("<b>Qty</b>", ParagraphStyle("muted_r", fontSize=8, textColor=MUTED, alignment=TA_RIGHT)),
+        Paragraph("<b>Unit Price</b>", ParagraphStyle("muted_r", fontSize=8, textColor=MUTED, alignment=TA_RIGHT)),
+        Paragraph("<b>Disc%</b>", ParagraphStyle("muted_r", fontSize=8, textColor=MUTED, alignment=TA_RIGHT)),
+        Paragraph("<b>Amount</b>", ParagraphStyle("muted_r", fontSize=8, textColor=MUTED, alignment=TA_RIGHT)),
+    ]]
+
+    for i, item in enumerate(quote.items, 1):
+        desc = f"<b>{item.product_name}</b>"
+        if item.description:
+            desc += f"<br/><font color='#6b7280' size=7>{item.description}</font>"
+        item_rows.append([
+            Paragraph(f"{i:02d}", muted),
+            Paragraph(desc, normal),
+            Paragraph(item.size_capacity or "—", normal),
+            Paragraph(item.color or "—", normal),
+            Paragraph(item.lead_time or "—", normal),
+            Paragraph(str(item.quantity), right),
+            Paragraph(f"{quote.currency} {item.unit_price:.2f}", right),
+            Paragraph(f"{item.discount_pct}%", right),
+            Paragraph(f"{quote.currency} {(item.final_price or 0):.2f}", right_bold),
+        ])
+
+    items_table = Table(item_rows, colWidths=[8*mm, 42*mm, 18*mm, 18*mm, 18*mm, 12*mm, 22*mm, 12*mm, 22*mm])
+    items_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), LIGHT_BG),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, BORDER),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.5, BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(items_table)
+    story.append(Spacer(1, 4*mm))
+
+    # ── Totals ───────────────────────────────────────────────────────────────
+    totals_rows = [
+        [Paragraph("Subtotal", muted), Paragraph(f"{quote.currency} {subtotal:.2f}", right)],
+        [Paragraph(f"Tax ({quote.tax_pct}%)", muted), Paragraph(f"{quote.currency} {tax:.2f}", right)],
+    ]
+    if quote.adjustment:
+        totals_rows.append([
+            Paragraph("Adjustment", muted),
+            Paragraph(f"{quote.currency} {quote.adjustment:.2f}", right)
+        ])
+    totals_rows.append([
+        Paragraph("<b>Grand Total Due</b>", bold),
+        Paragraph(f"<b>{quote.currency} {grand_total:.2f}</b>", right_bold),
+    ])
+
+    totals_table = Table(totals_rows, colWidths=[130*mm, 42*mm])
+    totals_table.setStyle(TableStyle([
+        ("LINEABOVE", (0, -1), (-1, -1), 1.5, BLACK),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(totals_table)
+
+    # ── Notes & Terms ────────────────────────────────────────────────────────
+    if quote.notes:
+        story.append(Spacer(1, 5*mm))
+        story.append(Paragraph("<b>NOTES</b>", muted))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(quote.notes, normal))
+
+    if quote.terms:
+        story.append(Spacer(1, 5*mm))
+        story.append(Paragraph("<b>TERMS &amp; CONDITIONS</b>", muted))
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(quote.terms, normal))
+
+    # ── Footer ───────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 8*mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(
+        f"Executive Ledger &nbsp;|&nbsp; {quote.quote_number} v{quote.version} &nbsp;|&nbsp; Generated {created}",
+        center
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
